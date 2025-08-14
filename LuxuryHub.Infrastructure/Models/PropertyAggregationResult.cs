@@ -1,9 +1,10 @@
 using MongoDB.Bson;
 using MongoDB.Bson.Serialization.Attributes;
+using LuxuryHub.Domain.Entities;
 
-namespace LuxuryHub.Domain.Entities;
+namespace LuxuryHub.Infrastructure.Models;
 
-public class Property
+public class PropertyAggregationResult
 {
     [BsonId]
     [BsonRepresentation(BsonType.ObjectId)]
@@ -29,16 +30,14 @@ public class Property
     public string IdOwner { get; set; } = string.Empty;
 
     [BsonElement("createdAt")]
-    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAt { get; set; }
 
     [BsonElement("updatedAt")]
-    public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
+    public DateTime UpdatedAt { get; set; }
 
-    // Navigation property (not stored in MongoDB)
-    [BsonIgnore]
+    [BsonElement("owner")]
     public Owner? Owner { get; set; }
 
-    // Main image (populated by aggregation pipeline)
-    [BsonIgnore]
+    [BsonElement("mainImage")]
     public string? MainImage { get; set; }
 }

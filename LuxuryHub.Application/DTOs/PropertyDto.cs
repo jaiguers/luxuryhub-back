@@ -10,6 +10,7 @@ public class PropertyDto
     public int Year { get; set; }
     public string IdOwner { get; set; } = string.Empty;
     public OwnerDto? Owner { get; set; }
+    public string? MainImage { get; set; }
     public DateTime CreatedAt { get; set; }
     public DateTime UpdatedAt { get; set; }
 }

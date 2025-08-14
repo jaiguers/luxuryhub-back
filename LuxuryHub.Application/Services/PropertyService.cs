@@ -5,6 +5,7 @@ using LuxuryHub.Application.Requests;
 using LuxuryHub.Domain.Entities;
 using LuxuryHub.Domain.Exceptions;
 using LuxuryHub.Domain.Interfaces;
+using LuxuryHub.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
 
 namespace LuxuryHub.Application.Services;
@@ -15,6 +16,7 @@ public class PropertyService : IPropertyService
     private readonly IRepository<PropertyImage> _propertyImageRepository;
     private readonly IRepository<PropertyTrace> _propertyTraceRepository;
     private readonly IRepository<Owner> _ownerRepository;
+    private readonly ICacheService _cacheService;
     private readonly IMapper _mapper;
     private readonly ILogger<PropertyService> _logger;
 
@@ -23,6 +25,7 @@ public class PropertyService : IPropertyService
         IRepository<PropertyImage> propertyImageRepository,
         IRepository<PropertyTrace> propertyTraceRepository,
         IRepository<Owner> ownerRepository,
+        ICacheService cacheService,
         IMapper mapper,
         ILogger<PropertyService> logger)
     {
@@ -30,6 +33,7 @@ public class PropertyService : IPropertyService
         _propertyImageRepository = propertyImageRepository;
         _propertyTraceRepository = propertyTraceRepository;
         _ownerRepository = ownerRepository;
+        _cacheService = cacheService;
         _mapper = mapper;
         _logger = logger;
     }
@@ -62,7 +66,11 @@ public class PropertyService : IPropertyService
             var createdProperty = await _propertyRepository.AddAsync(property);
             var propertyDto = _mapper.Map<PropertyDto>(createdProperty);
 
-            _logger.LogInformation("Successfully created property with ID: {PropertyId}", propertyDto.Id);
+            // Invalidate related caches
+            await _cacheService.RemoveByPatternAsync("properties:*");
+            await _cacheService.RemoveAsync($"property:{propertyDto.Id}");
+
+            _logger.LogInformation("Successfully created property with ID: {PropertyId} and invalidated caches", propertyDto.Id);
 
             return propertyDto;
         }
@@ -84,6 +92,18 @@ public class PropertyService : IPropertyService
             _logger.LogInformation("Retrieving properties with filters: Name={Name}, Address={Address}, MinPrice={MinPrice}, MaxPrice={MaxPrice}, Page={PageNumber}, Size={PageSize}",
                 request.Name, request.Address, request.MinPrice, request.MaxPrice, request.PageNumber, request.PageSize);
 
+            // Generate cache key based on request parameters
+            var cacheKey = $"properties:{request.Name}:{request.Address}:{request.MinPrice}:{request.MaxPrice}:{request.PageNumber}:{request.PageSize}";
+            
+            // Try to get from cache first
+            var cachedResult = await _cacheService.GetAsync<PaginatedResult<PropertyDto>>(cacheKey);
+            if (cachedResult != null)
+            {
+                _logger.LogInformation("Retrieved {Count} properties from cache", cachedResult.Items.Count());
+                return cachedResult;
+            }
+
+            // If not in cache, get from database
             var properties = await _propertyRepository.GetPropertiesWithFiltersAsync(
                 request.Name,
                 request.Address,
@@ -111,7 +131,10 @@ public class PropertyService : IPropertyService
                 HasNextPage = request.PageNumber < (int)Math.Ceiling((double)totalCount / request.PageSize)
             };
 
-            _logger.LogInformation("Retrieved {Count} properties out of {TotalCount} total", propertyDtos.Count(), totalCount);
+            // Cache the result for 5 minutes
+            await _cacheService.SetAsync(cacheKey, result, TimeSpan.FromMinutes(5));
+
+            _logger.LogInformation("Retrieved {Count} properties out of {TotalCount} total and cached", propertyDtos.Count(), totalCount);
 
             return result;
         }
@@ -128,6 +151,16 @@ public class PropertyService : IPropertyService
         {
             _logger.LogInformation("Retrieving property with ID: {PropertyId}", id);
 
+            // Try to get from cache first
+            var cacheKey = $"property:{id}";
+            var cachedProperty = await _cacheService.GetAsync<PropertyDto>(cacheKey);
+            if (cachedProperty != null)
+            {
+                _logger.LogInformation("Retrieved property with ID: {PropertyId} from cache", id);
+                return cachedProperty;
+            }
+
+            // If not in cache, get from database
             var property = await _propertyRepository.GetPropertyWithOwnerAsync(id);
             if (property == null)
             {
@@ -135,7 +168,11 @@ public class PropertyService : IPropertyService
             }
 
             var propertyDto = _mapper.Map<PropertyDto>(property);
-            _logger.LogInformation("Successfully retrieved property with ID: {PropertyId}", id);
+            
+            // Cache the result for 10 minutes (longer for individual properties)
+            await _cacheService.SetAsync(cacheKey, propertyDto, TimeSpan.FromMinutes(10));
+            
+            _logger.LogInformation("Successfully retrieved property with ID: {PropertyId} and cached", id);
 
             return propertyDto;
         }

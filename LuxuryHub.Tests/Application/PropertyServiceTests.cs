@@ -6,6 +6,7 @@ using LuxuryHub.Application.Services;
 using LuxuryHub.Domain.Entities;
 using LuxuryHub.Domain.Exceptions;
 using LuxuryHub.Domain.Interfaces;
+using LuxuryHub.Infrastructure.Services;
 using Microsoft.Extensions.Logging;
 using Moq;
 using Xunit;
@@ -17,6 +18,8 @@ public class PropertyServiceTests
     private readonly Mock<IPropertyRepository> _propertyRepositoryMock;
     private readonly Mock<IRepository<PropertyImage>> _propertyImageRepositoryMock;
     private readonly Mock<IRepository<PropertyTrace>> _propertyTraceRepositoryMock;
+    private readonly Mock<IRepository<Owner>> _ownerRepositoryMock;
+    private readonly Mock<ICacheService> _cacheServiceMock;
     private readonly Mock<IMapper> _mapperMock;
     private readonly Mock<ILogger<PropertyService>> _loggerMock;
     private readonly PropertyService _propertyService;
@@ -26,6 +29,8 @@ public class PropertyServiceTests
         _propertyRepositoryMock = new Mock<IPropertyRepository>();
         _propertyImageRepositoryMock = new Mock<IRepository<PropertyImage>>();
         _propertyTraceRepositoryMock = new Mock<IRepository<PropertyTrace>>();
+        _ownerRepositoryMock = new Mock<IRepository<Owner>>();
+        _cacheServiceMock = new Mock<ICacheService>();
         _mapperMock = new Mock<IMapper>();
         _loggerMock = new Mock<ILogger<PropertyService>>();
 
@@ -33,6 +38,8 @@ public class PropertyServiceTests
             _propertyRepositoryMock.Object,
             _propertyImageRepositoryMock.Object,
             _propertyTraceRepositoryMock.Object,
+            _ownerRepositoryMock.Object,
+            _cacheServiceMock.Object,
             _mapperMock.Object,
             _loggerMock.Object);
     }

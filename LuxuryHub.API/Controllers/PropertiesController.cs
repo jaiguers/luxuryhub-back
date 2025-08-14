@@ -59,7 +59,16 @@ public class PropertiesController : ControllerBase
     {
         try
         {
+            _logger.LogInformation("GET /api/properties called with request: {@Request}", request);
             var result = await _propertyService.GetPropertiesAsync(request);
+            
+            // Log the first property to debug
+            var firstProperty = result.Items.FirstOrDefault();
+            if (firstProperty != null)
+            {
+                _logger.LogInformation("First property - Owner: {@Owner}", firstProperty.Owner);
+            }
+            
             return Ok(result);
         }
         catch (Exception ex)

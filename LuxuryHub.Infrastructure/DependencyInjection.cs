@@ -2,6 +2,7 @@ using LuxuryHub.Domain.Entities;
 using LuxuryHub.Domain.Interfaces;
 using LuxuryHub.Infrastructure.Data;
 using LuxuryHub.Infrastructure.Repositories;
+using LuxuryHub.Infrastructure.Services;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -41,6 +42,9 @@ public static class DependencyInjection
         services.AddScoped<IRepository<Owner>, OwnerRepository>();
         services.AddScoped<IRepository<PropertyImage>, PropertyImageRepository>();
         services.AddScoped<IRepository<PropertyTrace>, PropertyTraceRepository>();
+
+        // Register cache service
+        services.AddScoped<ICacheService, CacheService>();
 
         return services;
     }

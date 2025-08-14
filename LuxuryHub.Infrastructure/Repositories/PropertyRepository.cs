@@ -1,6 +1,7 @@
 using LuxuryHub.Domain.Entities;
 using LuxuryHub.Domain.Interfaces;
 using LuxuryHub.Infrastructure.Data;
+using LuxuryHub.Infrastructure.Models;
 using Microsoft.Extensions.Logging;
 using MongoDB.Driver;
 using MongoDB.Bson;
@@ -29,41 +30,124 @@ public class PropertyRepository : BaseRepository<Property>, IPropertyRepository
     {
         try
         {
-            var filter = Builders<Property>.Filter.Empty;
-
-            if (!string.IsNullOrWhiteSpace(name))
+            // Build match filter
+            var matchFilter = new BsonDocument();
+            
+            if (!string.IsNullOrWhiteSpace(name) || !string.IsNullOrWhiteSpace(address))
             {
-                filter &= Builders<Property>.Filter.Regex("name", new BsonRegularExpression(name, "i"));
+                var textFilter = new BsonDocument();
+                if (!string.IsNullOrWhiteSpace(name))
+                {
+                    textFilter.Add("name", new BsonRegularExpression(name, "i"));
+                }
+                if (!string.IsNullOrWhiteSpace(address))
+                {
+                    textFilter.Add("address", new BsonRegularExpression(address, "i"));
+                }
+                matchFilter.Add("$or", new BsonArray { textFilter });
             }
 
-            if (!string.IsNullOrWhiteSpace(address))
+            if (minPrice.HasValue || maxPrice.HasValue)
             {
-                filter &= Builders<Property>.Filter.Regex("address", new BsonRegularExpression(address, "i"));
+                var priceFilter = new BsonDocument();
+                if (minPrice.HasValue)
+                {
+                    priceFilter.Add("$gte", minPrice.Value);
+                }
+                if (maxPrice.HasValue)
+                {
+                    priceFilter.Add("$lte", maxPrice.Value);
+                }
+                matchFilter.Add("price", priceFilter);
             }
 
-            if (minPrice.HasValue)
+            // If no filters, use empty match
+            if (matchFilter.ElementCount == 0)
             {
-                filter &= Builders<Property>.Filter.Gte("price", minPrice.Value);
+                matchFilter = new BsonDocument();
             }
 
-            if (maxPrice.HasValue)
+            var pipeline = new[]
             {
-                filter &= Builders<Property>.Filter.Lte("price", maxPrice.Value);
-            }
+                new BsonDocument("$match", matchFilter),
+                new BsonDocument("$lookup", new BsonDocument
+                {
+                    { "from", "owners" },
+                    { "localField", "idOwner" },
+                    { "foreignField", "_id" },
+                    { "as", "owner" }
+                }),
+                new BsonDocument("$unwind", new BsonDocument
+                {
+                    { "path", "$owner" },
+                    { "preserveNullAndEmptyArrays", true }
+                }),
+                new BsonDocument("$lookup", new BsonDocument
+                {
+                    { "from", "propertyImages" },
+                    { "localField", "_id" },
+                    { "foreignField", "idProperty" },
+                    { "as", "images" }
+                }),
+                new BsonDocument("$addFields", new BsonDocument
+                {
+                    { "mainImage", new BsonDocument("$ifNull", new BsonArray
+                    {
+                        new BsonDocument("$arrayElemAt", new BsonArray
+                        {
+                            new BsonDocument("$filter", new BsonDocument
+                            {
+                                { "input", "$images" },
+                                { "cond", new BsonDocument("$eq", new BsonArray { "$$this.enabled", true }) }
+                            }),
+                            0
+                        }),
+                        BsonNull.Value
+                    })}
+                }),
+                new BsonDocument("$project", new BsonDocument
+                {
+                    { "_id", 1 },
+                    { "name", 1 },
+                    { "address", 1 },
+                    { "price", 1 },
+                    { "codeInternal", 1 },
+                    { "year", 1 },
+                    { "idOwner", 1 },
+                    { "createdAt", 1 },
+                    { "updatedAt", 1 },
+                    { "owner", 1 },
+                    { "mainImage", new BsonDocument("$ifNull", new BsonArray { "$mainImage.file", BsonNull.Value }) }
+                }),
+                new BsonDocument("$sort", new BsonDocument("createdAt", -1)),
+                new BsonDocument("$skip", skip),
+                new BsonDocument("$limit", take)
+            };
 
-            var properties = await _collection
-                .Find(filter)
-                .Sort(Builders<Property>.Sort.Descending("createdAt"))
-                .Skip(skip)
-                .Limit(take)
-                .ToListAsync();
+            var aggregationResults = await _collection.Aggregate<PropertyAggregationResult>(pipeline).ToListAsync();
 
-            _logger.LogInformation("Retrieved {Count} properties with filters", properties.Count);
+            // Convert to Property entities
+            var properties = aggregationResults.Select(result => new Property
+            {
+                Id = result.Id,
+                Name = result.Name,
+                Address = result.Address,
+                Price = result.Price,
+                CodeInternal = result.CodeInternal,
+                Year = result.Year,
+                IdOwner = result.IdOwner,
+                CreatedAt = result.CreatedAt,
+                UpdatedAt = result.UpdatedAt,
+                Owner = result.Owner,
+                MainImage = result.MainImage
+            }).ToList();
+
+            _logger.LogInformation("Retrieved {Count} properties with optimized aggregation pipeline", properties.Count);
             return properties;
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Error retrieving properties with filters");
+            _logger.LogError(ex, "Error retrieving properties with optimized aggregation pipeline");
             throw;
         }
     }
@@ -147,25 +231,18 @@ public class PropertyRepository : BaseRepository<Property>, IPropertyRepository
     {
         try
         {
-            var pipeline = new[]
+            var property = await _collection.Find(p => p.Id == id).FirstOrDefaultAsync();
+            if (property == null)
             {
-                new BsonDocument("$match", new BsonDocument("_id", ObjectId.Parse(id))),
-                new BsonDocument("$lookup", new BsonDocument
-                {
-                    { "from", "owners" },
-                    { "localField", "idOwner" },
-                    { "foreignField", "_id" },
-                    { "as", "owner" }
-                }),
-                new BsonDocument("$unwind", new BsonDocument
-                {
-                    { "path", "$owner" },
-                    { "preserveNullAndEmptyArrays", true }
-                })
-            };
+                return null;
+            }
 
-            var property = await _collection.Aggregate<Property>(pipeline).FirstOrDefaultAsync();
-            _logger.LogInformation("Retrieved property with ID: {PropertyId}, Owner found: {HasOwner}", id, property?.Owner != null);
+            // Get owner for the property
+            var owner = await _ownersCollection.Find(o => o.Id == property.IdOwner).FirstOrDefaultAsync();
+            property.Owner = owner;
+
+            _logger.LogInformation("Retrieved property with ID: {PropertyId}, Owner found: {HasOwner}", 
+                id, property.Owner != null);
             return property;
         }
         catch (Exception ex)

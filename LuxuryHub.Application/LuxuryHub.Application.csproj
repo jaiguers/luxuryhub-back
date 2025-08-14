@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\LuxuryHub.Domain\LuxuryHub.Domain.csproj" />
+    <ProjectReference Include="..\LuxuryHub.Infrastructure\LuxuryHub.Infrastructure.csproj" />
   </ItemGroup>
 
 </Project>
